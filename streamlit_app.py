@@ -153,20 +153,50 @@ def get_live_state():
                 "market": market,
             }
 
-    return asyncio.run(fetch())
+    try:
+        return asyncio.run(fetch())
+    except Exception as exc:  # noqa: BLE001 — see below
+        # A deployment without credentials, or an Alpaca outage, must still
+        # render: the live panels report themselves unavailable and every
+        # journal-derived panel works exactly as normal. Returning a degraded
+        # payload makes that a deliberate state rather than an incidental one.
+        #
+        # This also absorbs the anyio "cancel scope in a different task"
+        # teardown error, which surfaces when the MCP subprocess is closed from
+        # Streamlit's script thread rather than the loop that opened it.
+        return {
+            "clock": None,
+            "portfolio": None,
+            "spots": {},
+            "market": [],
+            "unavailable": str(exc)[:200],
+        }
+
+
+def _live_or_raise() -> dict:
+    """The live state, or a clear error for `safe()` to turn into a notice.
+
+    Raising here rather than returning None keeps the existing contract: every
+    caller goes through `safe()`, which renders the "Live data unavailable" card
+    with the reason attached.
+    """
+    state = get_live_state()
+    if state.get("unavailable"):
+        raise RuntimeError(state["unavailable"])
+    return state
 
 
 def get_account_snapshot():
-    state = get_live_state()
+    state = _live_or_raise()
     return state["portfolio"], state["spots"]
 
 
 def get_market_state():
-    return get_live_state()["market"]
+    return _live_or_raise()["market"]
 
 
 def get_clock_state():
-    return get_live_state()["clock"]
+    return _live_or_raise()["clock"]
 
 
 def safe(fn, *args, **kwargs):

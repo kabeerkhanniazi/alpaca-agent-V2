@@ -199,3 +199,33 @@ def test_a_thin_rationale_is_flagged_but_never_suppressed():
     assert "cites no numbers" in source
     # It must still be rendered: the flag is a caption beside it, not a filter.
     assert "rationale else" in source or "T.esc(rationale)" in source
+
+
+def test_the_dashboard_renders_with_credentials_stubbed_out(monkeypatch):
+    """A public deployment without Alpaca keys must render, not error.
+
+    This is not hypothetical: the Streamlit Cloud instance reads the journal
+    from a git branch and may have no broker credentials at all. Every
+    journal-derived panel has to work exactly as normal.
+    """
+    monkeypatch.setenv("ALPACA_API_KEY", "")
+    monkeypatch.setenv("ALPACA_SECRET_KEY", "")
+
+    app = render()
+    assert not app.exception, [str(e.value) for e in app.exception]
+
+    blob = markup(app)
+    for anchor in ("portfolio", "risk-gate", "performance", "market",
+                   "journal", "agent-reasoning"):
+        assert f'id="{anchor}"' in blob, f"{anchor} vanished without credentials"
+
+
+def test_the_live_accessors_raise_rather_than_returning_none(monkeypatch):
+    """`safe()` turns an exception into the 'unavailable' card.
+
+    Returning None instead would read as "no error, no data" and render an empty
+    panel with no explanation of why.
+    """
+    source = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+    assert "_live_or_raise" in source
+    assert 'raise RuntimeError(state["unavailable"])' in source
