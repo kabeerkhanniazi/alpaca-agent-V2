@@ -1,0 +1,38 @@
+{
+  "_comment": "Thresholds for the nine deterministic risk-gate rules. Every value here is read at runtime by options_agent/nodes/risk_gate.py — no threshold is ever hard-coded in the checking logic. Tune these without touching code.",
+
+  "delta": {
+    "max_abs": 0.20,
+    "rationale": "Rule 1. ~20% probability of finishing ITM, so ~80% of spreads expire worthless. Keeps the short strike well away from at-the-money."
+  },
+  "notional": {
+    "max_loss_pct": 0.02,
+    "rationale": "Rule 2. Worst-case loss on any single position capped at 2% of net liquidation value. A full loss is recoverable; three in a row is still survivable."
+  },
+  "portfolio": {
+    "max_delta_dollars_pct": 0.50,
+    "rationale": "Rule 3. Net delta-dollars across all open positions capped at 50% of NAV: the book is never more directionally exposed than being half long the index. RECALIBRATED from plan.md's 0.10. A single 15-delta bull put spread sized to the 2% loss budget carries roughly $32k of delta-dollars on a $100k account, so a 0.10 cap ($10k) rejects every trade the rest of the strategy is designed to produce. 0.50 still binds - it caps the book at about two concurrent max-size positions - while letting the agent actually trade. Lower it to tighten; the gate sizes positions down to fit rather than rejecting outright.",
+    "plan_md_original": 0.10
+  },
+  "premium": {
+    "min_credit_usd": 25.0,
+    "rationale": "Rule 4. Below $25 per contract the credit does not compensate for bid/ask slippage and commission. Also filters out illiquid strikes."
+  },
+  "duplicate": {
+    "match_on": ["underlying", "expiry", "strike"],
+    "rationale": "Rule 5. Never stack a second position on a strike already held. Prevents silent over-concentration across cycles."
+  },
+  "dte": {
+    "min_days": 7,
+    "max_days": 14,
+    "rationale": "Rules 6 and 7. Under 7 days gamma dominates and a small spot move swings P&L violently. Over 14 days theta decay is too slow to be worth the capital."
+  },
+  "daily_loss": {
+    "kill_switch_pct": 0.05,
+    "rationale": "Rule 8. If the book is down more than 5% on the day, stop opening anything. Circuit breaker against compounding a bad day."
+  },
+  "buying_power": {
+    "min_reserve_pct": 0.20,
+    "rationale": "Rule 9. Always keep 20% of starting buying power unused, so positions moving against us cannot trigger a margin call."
+  }
+}

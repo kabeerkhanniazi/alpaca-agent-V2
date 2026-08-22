@@ -1,0 +1,28 @@
+# MCP client — connect to the Alpaca MCP server, list and call tools.
+# The Alpaca MCP server itself is not a Python dependency: it is launched as a
+# subprocess with `uvx alpaca-mcp-server`, so `uv` must be on PATH.
+mcp>=2.0.0
+
+# LLM provider HTTP. Async, because the MCP client is async and the whole
+# orchestrator loop stays async.
+httpx>=0.27.0
+
+# Data handling
+pandas>=2.2.0
+numpy>=1.26.0
+
+# Config
+python-dotenv>=1.0.0
+
+# Dashboard
+streamlit>=1.30.0
+plotly>=5.18.0
+
+# Tests
+pytest>=7.4.0
+pytest-mock>=3.12.0
+pytest-asyncio>=0.23.0
+
+# NOT a dependency: alpaca-py. Every Alpaca call goes through the MCP server.
+# Its presence in the agent path is a compliance failure — see
+# tests/test_no_sdk_import.py.

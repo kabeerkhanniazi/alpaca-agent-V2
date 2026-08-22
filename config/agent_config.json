@@ -1,0 +1,34 @@
+{
+  "_comment": "Settings that did not exist in the previous build: the model loop, the MCP data layer, and cycle timing. Strategy thresholds are NOT here -- underlyings, delta range, DTE range, spread widths, exits and execution live in options_config.json, and the nine risk-gate thresholds live in risk_config.json. Those two files are what the ported modules read, and duplicating any value here would create a second source of truth that silently disagrees.",
+
+  "cycle_interval_seconds": 300,
+
+  "max_turns_per_ticker": 8,
+  "_max_turns_note": "8, not the 5 originally planned. A real research pass costs clock -> account -> positions -> chain -> snapshots before a proposal is even possible, so 5 risks exhausting the budget before the model can propose anything. Note the model issues tool calls in PARALLEL (observed: get_clock and get_account_info in one turn), so a turn is not the same as a tool call. turns_used is journalled every cycle so this is tuned from observed data.",
+
+  "cycle_timeout_seconds": 240,
+  "_cycle_timeout_note": "Wall-clock ceiling per ticker. Validated at load to stay below cycle_interval_seconds, so a hung provider cannot stall the next cron run.",
+
+  "llm": {
+    "provider": "openrouter",
+    "model": "nvidia/nemotron-3-ultra-550b-a55b:free",
+    "fallbacks": [
+      { "provider": "groq", "model": "openai/gpt-oss-120b" },
+      { "provider": "gemini", "model": "gemini-3.6-flash" }
+    ],
+    "_free_tier_note": "Free OpenRouter models only. No Anthropic model is offered on the free tier, so the 'Claude via OpenRouter' framing in STACK.md section 3 is not reachable; docs/WRITEUP.md must name the model that actually drove the trading.",
+    "_selection_note": "Primary chosen empirically by spikes/gate_stage2.py --survey: 12 of 17 free tool-calling models passed a two-tool round-trip, and this is the largest that passed. Do not swap it for an untested one -- z-ai/glm-5.2 and both thinkingmachines/inkling variants failed.",
+    "_rate_limit_warning": "This OpenRouter key is free-tier. The agent's shape is up to 24 model calls per cycle (3 underlyings x 8 turns), which at a 5-minute cadence exceeds free daily caps well before the session ends. Failover to Groq absorbs it and is journalled per cycle, so nothing breaks -- but most cycles will then be Groq-driven. Levers: raise cycle_interval_seconds, lower max_turns_per_ticker, or add OpenRouter credits."
+  },
+
+  "chain": {
+    "feed": "indicative",
+    "_feed_note": "Passed explicitly on every options call. The MCP tool schema defaults to 'opra', and an account without a signed OPRA agreement gets 403 'OPRA agreement is not signed' rather than a silent downgrade to the free feed. Omitting this one word fails 100% of option calls.",
+
+    "strike_bracket_pct": 0.15,
+    "_bracket_note": "Fraction of spot to bracket the chain request with. Generous on purpose: the -0.15..-0.20 delta window is not a fixed distance from spot, it moves with IV and DTE, so a bracket tuned in a mid-IV regime returns nothing in a low-IV week. Widening this is the fix for a bracket_too_narrow event.",
+
+    "limit": 1000,
+    "_limit_note": "get_option_chain truncates a STRIKE-ASCENDING ordering. An unbracketed SPY put chain starts near strike 420 against a spot of 765, so a small limit returns only worthless deep-OTM contracts, none of which carry Greeks at all."
+  }
+}

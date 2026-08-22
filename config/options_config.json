@@ -1,0 +1,52 @@
+{
+  "_comment": "Strategy and scheduling knobs for the options agent. Read by options_agent/config.py.",
+
+  "underlyings": ["SPY", "QQQ", "IWM"],
+
+  "account": {
+    "_comment": "starting_buying_power anchors the Rule 9 reserve check. Null means: snapshot it from the account on first run and persist to data/account_baseline.json.",
+    "starting_buying_power": null
+  },
+
+  "iv": {
+    "high_regime_min": 60.0,
+    "low_regime_max": 30.0,
+    "min_history_samples": 20,
+    "realized_vol_window": 20,
+    "lookback_days": 252,
+    "skip_when_regime_low": false,
+    "_comment": "skip_when_regime_low is false for the hackathon run: plan.md's risk table says start permissive and tighten as P&L builds. Flip to true to only sell premium when it is genuinely expensive."
+  },
+
+  "spread_builder": {
+    "target_delta": -0.16,
+    "delta_range": [-0.20, -0.15],
+    "min_spread_width": 5.0,
+    "max_spread_width": 10.0,
+    "max_bid_ask_spread_pct": 0.35,
+    "min_open_interest": 0,
+    "top_n": 10
+  },
+
+  "execution": {
+    "limit_price_mode": "mid",
+    "limit_price_slippage": 0.02,
+    "time_in_force": "day",
+    "max_new_positions_per_cycle": 1,
+    "_comment": "limit_price_slippage shaves 2c off the mid so the credit order has a realistic chance of filling without giving away the whole edge."
+  },
+
+  "position_management": {
+    "exit_if_profit_pct": 50,
+    "exit_if_loss_pct": -100,
+    "exit_if_dte_below": 2,
+    "_comment": "Take profit once half the credit is captured. Cut at a loss equal to the credit received. Always close by 2 DTE to avoid pin and assignment risk."
+  },
+
+  "market_hours": {
+    "open_time": "09:30",
+    "close_time": "16:00",
+    "timezone": "US/Eastern",
+    "_comment": "Informational. The runtime gate uses Alpaca's own clock endpoint, not these values."
+  }
+}

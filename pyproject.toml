@@ -1,0 +1,13 @@
+[project]
+name = "alpaca-mcp-agent"
+version = "0.1.0"
+description = "MCP-mediated autonomous options agent for Alpaca"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+filterwarnings = ["ignore::DeprecationWarning"]
+markers = [
+    "integration: touches the live Alpaca API. Deselect with -m 'not integration' to stay offline.",
+]

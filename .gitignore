@@ -1,0 +1,11 @@
+.env
+.venv/
+venv/
+logs/
+data/
+__pycache__/
+.pytest_cache/
+.streamlit/secrets.toml
+spikes/*.json
+tests/fixtures/*.json
+!tests/fixtures/mcp_responses.json

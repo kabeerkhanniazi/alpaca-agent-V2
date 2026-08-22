@@ -1,0 +1,20 @@
+# Streamlit's own chrome — tabs, buttons, expanders, spinners, the dataframe
+# widget — is themed here so it does not clash with the stylesheet injected by
+# options_agent/dashboard_theme.py. Both must agree; these values are the same
+# tokens, restated in the form Streamlit understands.
+
+[theme]
+base = "dark"
+backgroundColor = "#0a0a12"
+secondaryBackgroundColor = "#141422"
+primaryColor = "#ff2d78"
+textColor = "#e8e0f0"
+font = "sans serif"
+
+[server]
+# The dashboard is read-only; nobody should be uploading anything to it.
+maxUploadSize = 1
+enableXsrfProtection = true
+
+[browser]
+gatherUsageStats = false
