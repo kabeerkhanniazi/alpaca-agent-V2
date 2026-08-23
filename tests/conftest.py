@@ -56,7 +56,7 @@ def config(risk_config, options_config, agent_config, tmp_path) -> AgentConfig:
         agent=agent_config,
         credentials=None,
         paths={
-            "journal": tmp_path / "options_trades.jsonl",
+            "journal": tmp_path / "journal.jsonl",
             "iv_history": tmp_path / "iv_history.jsonl",
             "baseline": tmp_path / "account_baseline.json",
             "logs": tmp_path,
