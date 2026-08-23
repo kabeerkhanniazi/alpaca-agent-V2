@@ -5,7 +5,7 @@ Cloud, which has an ephemeral filesystem and no scheduler. So the deployed app
 can only ever *view* data produced elsewhere, and needs somewhere to read it
 from. Three sources are tried in order, most-live first:
 
-1. **Local file** — ``data/options_trades.jsonl``. What a developer running the
+1. **Local file** — ``data/journal.jsonl``. What a developer running the
    app on the trading machine sees. Always the freshest.
 2. **Remote data branch** — a public raw URL, refreshed by the agent every
    cycle. This is what a deployed instance normally reads. Pushing to a branch
@@ -38,7 +38,7 @@ SNAPSHOT_PATH = REPO_ROOT / "data" / "snapshot" / "journal_snapshot.jsonl"
 # Streamlit secrets so a fork does not have to edit code.
 DEFAULT_REMOTE_URL = (
     "https://raw.githubusercontent.com/"
-    "kabeerkhanniazi/alpaca-agent/data/options_trades.jsonl"
+    "kabeerkhanniazi/alpaca-agent-V2/data/journal.jsonl"
 )
 
 SOURCE_LOCAL = "local"
