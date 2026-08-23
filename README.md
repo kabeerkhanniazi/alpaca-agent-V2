@@ -150,7 +150,7 @@ config/
 ## Tests
 
 ```bash
-.venv/bin/python -m pytest tests/ -q                      # 433 tests
+.venv/bin/python -m pytest tests/ -q                      # 439 tests
 .venv/bin/python -m pytest tests/ -q -m "not integration" # fully offline
 ```
 

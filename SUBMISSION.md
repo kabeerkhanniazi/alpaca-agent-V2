@@ -34,7 +34,7 @@
 
 ## What is verified
 
-- **433 tests pass** (420 fully offline, no credentials needed).
+- **439 tests pass** (424 fully offline, no credentials needed).
 - **Live cycle end to end**: `cron_runner.py --dry-run --force --ticker SPY`
   completes against real market data — 724 contracts fetched, 21 candidates in
   the delta window, model proposed in 4 turns, nine-rule verdict recorded, no
