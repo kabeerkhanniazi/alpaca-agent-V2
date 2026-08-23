@@ -82,7 +82,7 @@ positions, and closing a profitable short leg on its own would orphan the long p
 ## Quick start
 
 ```bash
-git clone <repo> && cd alpaca-mcp-agent
+git clone https://github.com/kabeerkhanniazi/alpaca-agent-V2.git && cd alpaca-agent-V2
 curl -LsSf https://astral.sh/uv/install.sh | sh   # the MCP server runs via uvx
 uv venv && uv pip install -r requirements.txt
 cp .env.example .env                              # then fill it in

@@ -9,7 +9,7 @@
 
 | | |
 |---|---|
-| Repository | `TODO` — needs a GitHub remote |
+| Repository | https://github.com/kabeerkhanniazi/alpaca-agent-V2 |
 | Dashboard | `TODO` — Streamlit Cloud, tracks `main`, reads the `data` branch |
 | Demo video | `TODO` — 3 min, script in `demo/video_script.md` |
 | Judged account ID | `TODO` — fresh paper account, created immediately before go-live |
@@ -54,8 +54,10 @@
 
 ## What is not done
 
-1. **No git remote.** `scripts/push_journal.sh` works up to the push and then
-   exits 128 — it needs an `origin`. Until then the deployed dashboard would
+1. **Nothing pushed yet.** The `origin` remote is configured
+   (https://github.com/kabeerkhanniazi/alpaca-agent-V2) but this machine has no stored git
+   credentials, so `main` still needs an interactive `git push`. Until that
+   happens `scripts/push_journal.sh` exits 128 and a deployed dashboard would
    freeze at its seeded state.
 2. **No fresh judged account.** Deliberate: `PLAN.md` §6 says create it only
    after the code is verified, so its history contains nothing but judged
@@ -72,8 +74,8 @@
 
 ## Go-live checklist
 
-1. Create a GitHub repo; `git remote add origin <url>`; push `main`.
-2. Verify `scripts/push_journal.sh` exits 0 with a remote configured.
+1. `git push -u origin main` (remote already configured; needs your credentials).
+2. Verify `scripts/push_journal.sh` exits 0 now that `origin` is reachable.
 3. Deploy `streamlit_app.py` to Streamlit Cloud tracking `main`.
 4. Create the **fresh** paper account. Confirm $100,000 and options level 3.
    Point `.env` at the new keys. Record the account ID above.
