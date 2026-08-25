@@ -36,10 +36,28 @@ fi
 
 # Refuse to publish anything that looks like a credential. The journal should
 # only ever hold trade decisions, but this is the step that makes it public.
-if grep -qE "(PK[A-Z0-9]{16,}|SECRET_KEY|API_KEY)" "${JOURNAL}"; then
-  echo "REFUSING TO PUSH: the journal contains something key-shaped." >&2
-  exit 1
-fi
+#
+# Matches secret VALUES, not key NAMES. The earlier version also matched the
+# bare words "API_KEY" and "SECRET_KEY", which appear legitimately in prose —
+# the agent's own 401 message says "check ALPACA_API_KEY and ALPACA_SECRET_KEY
+# in .env" — so a helpful error silently blocked every publish for days while
+# the dashboard sat on stale data. A guard that cries wolf is worse than no
+# guard, because the failure looks like nothing happening.
+SECRET_PATTERNS=(
+  'PK[A-Z0-9]{16,}'                                  # Alpaca key id
+  'sk-or-v1-[A-Za-z0-9]{20,}'                        # OpenRouter
+  'gsk_[A-Za-z0-9]{30,}'                             # Groq
+  '(API_KEY|SECRET_KEY|TOKEN)"?[[:space:]]*[:=][[:space:]]*"?[A-Za-z0-9_-]{16,}'
+)
+for pattern in "${SECRET_PATTERNS[@]}"; do
+  if grep -qE "${pattern}" "${JOURNAL}"; then
+    echo "REFUSING TO PUSH: the journal contains something key-shaped." >&2
+    echo "  matched: ${pattern}" >&2
+    echo "  offending line(s):" >&2
+    grep -nE "${pattern}" "${JOURNAL}" | head -3 | cut -c1-160 >&2
+    exit 1
+  fi
+done
 
 if [[ "${1:-}" == "--snapshot" ]]; then
   mkdir -p "$(dirname "${SNAPSHOT}")"

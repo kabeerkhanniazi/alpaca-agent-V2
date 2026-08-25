@@ -265,7 +265,10 @@ if clock_state:
         units = [(p[:-1], p[-1]) for p in parts if p != "now"]
         session = (
             f"Session ends {target:%H:%M %Z on %a %d %b}. "
-            "The agent runs a cycle every 5 minutes until then."
+            # Read from config rather than written here: the cadence has changed
+            # once already, and a hardcoded figure quietly becomes a lie.
+            f"The agent runs a cycle every {config.agent.get('cycle_interval_seconds', 900) // 60} "
+            "minutes until then."
             if is_open else
             f"Next session {target:%H:%M %Z on %a %d %b}. "
             "Scheduled cycles no-op until the bell."
