@@ -475,10 +475,19 @@ def latest_by_ticker(events: list[dict], types: tuple[str, ...]) -> dict[str, di
 
 latest_agent = latest_by_ticker(payload.events, AGENT_EVENTS)
 latest_gate = latest_by_ticker(payload.events, ("trade_approved", "trade_rejected"))
-latest_turns = {}
-for event in payload.events:
-    if event.get("event_type") == "agent_turn":
-        latest_turns.setdefault(event.get("ticker"), []).append(event)
+# Only the turns belonging to the SAME cycle as the outcome shown above. Keyed
+# on run_id rather than just ticker: without that this renders every turn the
+# agent has ever taken, which after a morning's trading is ninety tool calls
+# stacked under one rationale and tells the reader nothing.
+latest_turns: dict[str, list[dict]] = {}
+for ticker, outcome in latest_agent.items():
+    run_id = outcome.get("run_id")
+    latest_turns[ticker] = [
+        e for e in payload.events
+        if e.get("event_type") == "agent_turn"
+        and e.get("ticker") == ticker
+        and e.get("run_id") == run_id
+    ]
 
 if not latest_agent:
     st.info(

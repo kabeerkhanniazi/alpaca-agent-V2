@@ -3,8 +3,8 @@
   "cycle_interval_seconds": 900,
   "max_turns_per_ticker": 8,
   "_max_turns_note": "8, not the 5 originally planned. A real research pass costs clock -> account -> positions -> chain -> snapshots before a proposal is even possible, so 5 risks exhausting the budget before the model can propose anything. Note the model issues tool calls in PARALLEL (observed: get_clock and get_account_info in one turn), so a turn is not the same as a tool call. turns_used is journalled every cycle so this is tuned from observed data.",
-  "cycle_timeout_seconds": 240,
-  "_cycle_timeout_note": "Wall-clock ceiling per ticker. Validated at load to stay below cycle_interval_seconds, so a hung provider cannot stall the next cron run.",
+  "cycle_timeout_seconds": 600,
+  "_cycle_timeout_note": "Wall-clock ceiling per ticker, validated at load to stay below cycle_interval_seconds. Raised from 240: on a free tier a cycle legitimately spends 30-60s waiting out token-per-minute limits, and 240 was cutting tickers off mid-research and recording them as turn-limit defects.",
   "llm": {
     "provider": "groq",
     "model": "openai/gpt-oss-120b",
