@@ -10,11 +10,26 @@
 # autonomous order placement are two different decisions, and the second one
 # should be made on purpose.
 #
-# CRON_TZ pins the schedule to Eastern time. This matters: this machine runs on
-# PKT, so a bare "9-16" hour range would fire in the middle of the night in New
-# York. Belt and braces — cron_runner.py independently checks Alpaca's clock
-# endpoint and no-ops when the market is closed, so even a misfiring schedule
-# costs one wasted API call rather than a badly-timed trade.
+# The schedule runs EVERY five minutes, all hours, and lets cron_runner.py decide
+# whether to act. That is deliberate.
+#
+# The obvious version — "*/5 9-16" with CRON_TZ=America/New_York — does not work
+# here. Ubuntu's cron 3.0pl1 ignored CRON_TZ on this machine and evaluated the
+# hour range against local time instead, so a PKT box ran the agent 09:00-16:00
+# PKT, which is 00:00-07:00 in New York: precisely when the market is shut. The
+# failure is silent, because a schedule that never fires looks identical to one
+# that has nothing to do.
+#
+# Rather than depend on a timezone feature that may or may not be honoured,
+# every cycle asks Alpaca what time it is. A no-op costs one get_clock call and
+# exits in about three seconds, and it is immune to DST on either continent.
+#
+# Fifteen minutes, not five. Groq's free tier allows 1,000 requests a day but
+# only 8,000 tokens a minute, and one ticker costs roughly 6,000-12,000 tokens
+# across its turns. At a five-minute cadence three underlyings saturate that
+# window continuously: every cycle spent its time waiting on 429s and none of
+# them finished. At fifteen the budget recovers between cycles and a cycle
+# completes in under a minute. Raise it back only with a paid tier.
 #
 # PATH is set explicitly because cron's default is /usr/bin:/bin, and the MCP
 # server is launched as `uvx alpaca-mcp-server` from ~/.local/bin. Without this
@@ -61,9 +76,8 @@ mkdir -p "${REPO}/logs"
 
 BLOCK="$(cat <<CRON
 ${MARKER}
-CRON_TZ=America/New_York
 PATH=${HOME}/.local/bin:${HOME}/go/bin:/usr/local/bin:/usr/bin:/bin
-*/5 9-16 * * 1-5 cd ${REPO} && ${REPO}/.venv/bin/python cron_runner.py ${MODE} >> ${REPO}/logs/cron.log 2>&1; ${REPO}/scripts/push_journal.sh >> ${REPO}/logs/journal_push.log 2>&1
+*/15 * * * * cd ${REPO} && ${REPO}/.venv/bin/python cron_runner.py ${MODE} >> ${REPO}/logs/cron.log 2>&1; ${REPO}/scripts/push_journal.sh >> ${REPO}/logs/journal_push.log 2>&1
 ${MARKER}-end
 CRON
 )"

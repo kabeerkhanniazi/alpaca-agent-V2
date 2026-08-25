@@ -33,6 +33,8 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from .iv import expiry_from_symbol, strike_from_symbol
+
 logger = logging.getLogger(__name__)
 
 # Attribute name -> the wire keys that satisfy it.
@@ -419,6 +421,85 @@ class MCPBrokerView:
 
     def get_option_snapshots(self, symbols: list[str]) -> dict[str, Any]:
         return {s: self._snapshots[s] for s in symbols if s in self._snapshots}
+
+
+def summarise_chain(
+    payload: dict[str, Any],
+    *,
+    delta_range: tuple[float, float] | None = None,
+    limit: int = 40,
+) -> dict[str, Any]:
+    """Compact an option chain into the handful of rows a model can act on.
+
+    A bracketed SPY chain is ~700 contracts and ~300,000 characters of JSON.
+    Handing that to a model means it gets truncated, and because the chain is
+    ordered by ascending strike the surviving fragment is nothing but worthless
+    deep-OTM contracts — the ones Alpaca publishes no Greeks for. The model then
+    cannot find a tradeable strike, re-queries, and burns its whole turn budget
+    without proposing. That is exactly the `no_proposal_turn_limit` defect.
+
+    So the model is given a table instead of a dump: one row per contract that
+    actually carries Greeks, ordered by how close it sits to the target delta
+    window, capped at `limit`. Roughly 5KB instead of 300KB, and every row is a
+    strike it could legitimately choose.
+
+    Nothing here filters on tradeability or risk — the rows are ordered, not
+    judged. The risk gate remains the only thing that can veto a trade.
+    """
+    snapshots = (payload or {}).get("snapshots") or {}
+    if not snapshots:
+        return {"contracts": [], "total_contracts": 0, "shown": 0,
+                "note": "The chain came back empty for this request."}
+
+    low, high = sorted(delta_range) if delta_range else (-0.20, -0.15)
+    midpoint = (low + high) / 2.0
+
+    rows: list[dict[str, Any]] = []
+    without_greeks = 0
+
+    for symbol, snap in snapshots.items():
+        greeks = snap.get("greeks") if isinstance(snap, dict) else None
+        if not greeks:
+            without_greeks += 1
+            continue
+        quote = (snap.get("latestQuote") or {}) if isinstance(snap, dict) else {}
+        delta = greeks.get("delta")
+        if delta is None:
+            without_greeks += 1
+            continue
+        rows.append({
+            "symbol": symbol,
+            "strike": strike_from_symbol(symbol),
+            "expiry": str(expiry_from_symbol(symbol) or ""),
+            "delta": delta,
+            "iv": snap.get("impliedVolatility"),
+            "bid": quote.get("bp"),
+            "ask": quote.get("ap"),
+        })
+
+    # Closest to the middle of the target window first, so the strikes the
+    # strategy actually wants survive the cap.
+    rows.sort(key=lambda r: abs(float(r["delta"]) - midpoint))
+    shown = rows[:limit]
+    # Present them in a human order once the useful ones have been selected.
+    shown.sort(key=lambda r: (r["expiry"], -(r["strike"] or 0)))
+
+    in_window = sum(1 for r in shown if low <= float(r["delta"]) <= high)
+
+    return {
+        "contracts": shown,
+        "total_contracts": len(snapshots),
+        "with_greeks": len(rows),
+        "without_greeks": without_greeks,
+        "shown": len(shown),
+        "target_delta_window": [low, high],
+        "in_target_window": in_window,
+        "note": (
+            f"Compacted from {len(snapshots)} contracts to the {len(shown)} nearest "
+            f"the {low} to {high} delta window. {in_window} of them sit inside it. "
+            "Strikes are in dollars; delta is negative for puts."
+        ),
+    }
 
 
 def occ_symbol(root: str, expiry: str | date, strike: float, kind: str = "P") -> str:

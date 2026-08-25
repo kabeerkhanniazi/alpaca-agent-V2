@@ -98,8 +98,29 @@ def test_the_order_placement_tool_is_absent_even_though_the_agent_uses_it(connec
     assert "place_option_order" in connected_client.orchestrator_write_tools
 
 
-def test_the_model_gets_exactly_the_allowlist_plus_propose_spread(connected_client):
-    assert model_tool_names(connected_client) == set(ALLOWLIST["read_tools"]) | {PROPOSE_SPREAD}
+def test_the_model_gets_exactly_the_model_subset_plus_propose_spread(connected_client):
+    assert model_tool_names(connected_client) == set(ALLOWLIST["model_tools"]) | {PROPOSE_SPREAD}
+
+
+def test_the_model_subset_is_narrower_than_what_the_orchestrator_may_read():
+    """Every schema is resent on every turn, so the list has a token cost.
+
+    The tools left out are ones the orchestrator calls deterministically and the
+    analyst has no use for. Narrowing it also narrows what the model can reach,
+    so this is a security property as well as a budget one.
+    """
+    model = set(ALLOWLIST["model_tools"])
+    read = set(ALLOWLIST["read_tools"])
+    assert model < read, "the model list must be a strict subset of the read allowlist"
+    assert not model & set(ALLOWLIST["write_tools"])
+
+
+def test_the_model_still_gets_what_it_needs_to_do_the_job(connected_client):
+    """Trimming must not remove the tools the analyst prompt tells it to use."""
+    exposed = model_tool_names(connected_client)
+    for essential in ("get_clock", "get_account_info", "get_all_positions",
+                      "get_option_chain", PROPOSE_SPREAD):
+        assert essential in exposed, f"the analyst cannot work without {essential}"
 
 
 def test_a_tool_the_server_offers_but_the_allowlist_omits_is_not_exposed(connected_client):
@@ -229,3 +250,31 @@ async def test_live_server_exposes_no_write_tools_to_the_model():
             f"Server no longer exposes: {mcp.missing_read_tools()}. "
             "The allowlist references tools that have been renamed or removed."
         )
+
+
+def test_trimming_a_schema_preserves_its_contract():
+    """Only prose is shortened. Names, types, enums and required must survive.
+
+    A trimmed schema still has to describe exactly the same call, or the model
+    will make requests the server rejects.
+    """
+    from agent.mcp_client import _trim_schema
+
+    original = {
+        "type": "object",
+        "properties": {
+            "feed": {"type": "string", "enum": ["opra", "indicative"],
+                     "description": "The source feed of the data. " + "x" * 400},
+            "limit": {"type": "integer", "maximum": 1000},
+        },
+        "required": ["feed"],
+    }
+    trimmed = _trim_schema(original)
+
+    assert trimmed["required"] == ["feed"]
+    assert trimmed["properties"]["feed"]["enum"] == ["opra", "indicative"]
+    assert trimmed["properties"]["feed"]["type"] == "string"
+    assert trimmed["properties"]["limit"]["maximum"] == 1000
+    assert len(trimmed["properties"]["feed"]["description"]) < 200
+    # The original must not be mutated.
+    assert len(original["properties"]["feed"]["description"]) > 400

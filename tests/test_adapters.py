@@ -438,3 +438,50 @@ def test_options_orders_are_day_only():
     order = order_request(sell_symbol="A", buy_symbol="B", contracts=1,
                           limit_price=-0.53, client_order_id="x")
     assert order["time_in_force"] == "day"
+
+
+# ------------------------------------------------ chain compaction
+
+
+def test_a_real_chain_is_compacted_to_something_a_model_can_read(captured_chain):
+    """The turn-limit defect, at its root.
+
+    A bracketed SPY chain is ~450,000 characters. Truncating that to fit a
+    prompt leaves only the lowest strikes — which carry no Greeks — so the model
+    cannot find anything tradeable, re-queries, and exhausts its turn budget
+    without proposing.
+    """
+    from agent.adapters import summarise_chain
+
+    summary = summarise_chain(captured_chain, delta_range=(-0.20, -0.15))
+    assert len(json.dumps(summary)) < 6000, "must fit inside the tool-result budget"
+    assert summary["total_contracts"] > 500
+    assert summary["shown"] <= 40
+
+
+def test_compaction_keeps_the_strikes_the_strategy_actually_wants(captured_chain):
+    """Ordering by distance from the delta window is the whole point."""
+    from agent.adapters import summarise_chain
+
+    summary = summarise_chain(captured_chain, delta_range=(-0.20, -0.15))
+    assert summary["in_target_window"] > 0, "no tradeable strike survived compaction"
+    for row in summary["contracts"]:
+        assert row["delta"] is not None
+        assert row["strike"] is not None
+
+
+def test_contracts_without_greeks_are_excluded_and_counted(captured_chain):
+    """They cannot be evaluated against Rule 1, but their absence should be visible."""
+    from agent.adapters import summarise_chain
+
+    summary = summarise_chain(captured_chain, delta_range=(-0.20, -0.15))
+    assert summary["without_greeks"] >= 0
+    assert summary["with_greeks"] + summary["without_greeks"] == summary["total_contracts"]
+
+
+def test_compacting_an_empty_chain_says_so():
+    from agent.adapters import summarise_chain
+
+    summary = summarise_chain({"snapshots": {}})
+    assert summary["contracts"] == []
+    assert "empty" in summary["note"]
