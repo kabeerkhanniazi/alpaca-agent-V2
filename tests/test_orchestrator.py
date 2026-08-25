@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from datetime import date, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -477,3 +478,69 @@ async def test_one_ticker_failing_does_not_stop_the_others(config, journal):
     assert summary["outcomes"]["SPY"]["outcome"] == "error"
     assert summary["outcomes"]["QQQ"]["approved"] is True
     assert "error" in types(journal)
+
+
+# --------------------------------------------- infrastructure failures
+
+
+async def test_a_credential_failure_journals_a_reason_instead_of_a_traceback(config, journal):
+    """An unattended run needs a readable log line, not a stack dump.
+
+    A 401 arrives wrapped in an nginx HTML error page. Left unhandled it
+    propagates out of run_cycle and cron mails a traceback nobody reads.
+    """
+    from agent.mcp_client import MCPError
+
+    class Unauthorized(FakeMCP):
+        async def call_read(self, name, arguments=None):
+            if name == "get_clock":
+                raise MCPError(
+                    "get_clock failed: Error calling tool 'get_clock': HTTP error 401: "
+                    "Unauthorized - <html>\n<head><title>401 Authorization Required"
+                    "</title></head>\n<body>\n</body>\n</html>"
+                )
+            return await super().call_read(name, arguments)
+
+    mcp = Unauthorized()
+    agent = build(config, journal, ScriptedLLM(proposal_turn()), mcp)
+    summary = await agent.run_cycle(["SPY"], force=True)
+
+    assert summary["skipped"] == "alpaca_unreachable"
+    assert mcp.writes == []
+    assert "error" in types(journal)
+
+    # The message must name the fix, not quote the HTML.
+    reason = summary["errors"][0]
+    assert "401" in reason and "ALPACA_API_KEY" in reason
+    assert "<html>" not in reason
+
+
+async def test_an_account_read_failure_also_degrades_cleanly(config, journal):
+    from agent.mcp_client import MCPError
+
+    class NoAccount(FakeMCP):
+        async def call_read(self, name, arguments=None):
+            if name == "get_account_info":
+                raise MCPError("get_account_info failed: HTTP error 500")
+            return await super().call_read(name, arguments)
+
+    agent = build(config, journal, ScriptedLLM(proposal_turn()), NoAccount())
+    summary = await agent.run_cycle(["SPY"], force=True)
+
+    assert summary["skipped"] == "portfolio_unavailable"
+    assert "error" in types(journal)
+
+
+def test_an_html_error_page_is_collapsed_to_something_readable():
+    from agent.orchestrator import _explain
+
+    assert "ALPACA_API_KEY" in _explain(Exception("HTTP error 401: Unauthorized"))
+    assert "indicative" in _explain(Exception("403 Forbidden OPRA agreement is not signed"))
+    assert len(_explain(Exception("x" * 5000))) <= 300
+
+
+def test_a_market_closed_skip_is_not_treated_as_a_failure():
+    """cron must be able to tell 'nothing to do' from 'could not run'."""
+    source = (Path(__file__).resolve().parent.parent / "cron_runner.py").read_text()
+    assert 'skipped == "market_closed"' in source
+    assert "could not run" in source
