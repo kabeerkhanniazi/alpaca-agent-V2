@@ -50,6 +50,7 @@ from .adapters import (
     occ_symbol,
     option_positions,
     order_request,
+    summarise_chain,
 )
 from .config import AgentConfig
 from .iv import atm_implied_volatility, compute_iv_rank
@@ -471,14 +472,25 @@ class Orchestrator:
         """Run one model-requested read tool and render its result for the model."""
         try:
             payload = await self.mcp.call_read(call.name, call.arguments)
-            text = _dumps(payload)
         except MCPError as exc:
             # A failed tool call is information the model can act on — a bad
             # argument it can correct — not a reason to abandon the cycle.
-            text = _dumps({"error": str(exc)})
+            return _dumps({"error": str(exc)}), 0
+
+        # Chains are compacted rather than truncated. A bracketed SPY chain is
+        # ~450,000 characters; truncating it leaves only the lowest strikes,
+        # which carry no Greeks, so the model cannot find anything tradeable and
+        # re-queries until its turns run out.
+        if call.name in ("get_option_chain", "get_option_snapshot"):
+            payload = summarise_chain(payload, delta_range=self.config.delta_range)
+
+        text = _dumps(payload)
         size = len(text)
         if size > MAX_TOOL_RESULT_CHARS:
-            text = text[:MAX_TOOL_RESULT_CHARS] + f"... [truncated, {size} chars total]"
+            text = (
+                text[:MAX_TOOL_RESULT_CHARS]
+                + f"... [truncated at {MAX_TOOL_RESULT_CHARS} of {size} chars]"
+            )
         return text, size
 
     def _cycle_context(self, context: dict[str, Any]) -> str:
