@@ -590,42 +590,65 @@ gate_events = [e for e in payload.events
                if e.get("event_type") in ("trade_approved", "trade_rejected")]
 latest_checks = {c["rule"]: c for c in gate_events[-1].get("checks", [])} if gate_events else {}
 
+# Each rule carries a formatter for the limit the gate actually applied, so the
+# panel can show the journalled threshold rather than whatever the config says
+# today. Those two diverge whenever a threshold is tuned, and showing the
+# current limit beside a historical pass/fail produces the worst kind of
+# nonsense: a rule marked FAILED against a limit it plainly satisfies.
 RULES = [
-    ("R1", "R1_delta", "Short-leg delta cap", f"≤ {config.max_abs_delta:.2f}"),
-    ("R2", "R2_notional", "Max loss within budget", f"≤ {config.max_loss_pct:.0%} of NAV"),
-    ("R3", "R3_portfolio_delta", "Portfolio delta exposure", f"≤ {config.max_portfolio_delta_pct:.0%} of NAV"),
-    ("R4", "R4_min_premium", "Minimum credit", f"≥ {money(config.min_credit_usd)}"),
-    ("R5", "R5_duplicate", "No duplicate strike", "none open"),
-    ("R6", "R6_min_dte", "Minimum days to expiry", f"≥ {config.min_dte}d"),
-    ("R7", "R7_max_dte", "Maximum days to expiry", f"≤ {config.max_dte}d"),
-    ("R8", "R8_kill_switch", "Daily drawdown kill-switch", f"≤ {config.kill_switch_pct:.0%}"),
-    ("R9", "R9_buying_power", "Buying-power reserve", f"≥ {config.min_bp_reserve_pct:.0%}"),
+    ("R1", "R1_delta", "Short-leg delta cap",
+     f"\u2264 {config.max_abs_delta:.2f}", lambda v: f"\u2264 {float(v):.2f}"),
+    ("R2", "R2_notional", "Max loss within budget",
+     f"\u2264 {config.max_loss_pct:.0%} of NAV", lambda v: f"\u2264 {money(float(v))}"),
+    ("R3", "R3_portfolio_delta", "Portfolio delta exposure",
+     f"\u2264 {config.max_portfolio_delta_pct:.0%} of NAV", lambda v: f"\u2264 {money(float(v))}"),
+    ("R4", "R4_min_premium", "Minimum credit",
+     f"\u2265 {money(config.min_credit_usd)}", lambda v: f"\u2265 {money(float(v))}"),
+    ("R5", "R5_duplicate", "No duplicate strike", "none open", lambda v: "none open"),
+    ("R6", "R6_min_dte", "Minimum days to expiry",
+     f"\u2265 {config.min_dte}d", lambda v: f"\u2265 {float(v):.0f}d"),
+    ("R7", "R7_max_dte", "Maximum days to expiry",
+     f"\u2264 {config.max_dte}d", lambda v: f"\u2264 {float(v):.0f}d"),
+    ("R8", "R8_kill_switch", "Daily drawdown kill-switch",
+     f"\u2264 {config.kill_switch_pct:.0%}", lambda v: f"\u2264 {float(v):.0%}"),
+    ("R9", "R9_buying_power", "Buying-power reserve",
+     f"\u2265 {config.min_bp_reserve_pct:.0%}", lambda v: f"\u2265 {money(float(v))}"),
 ]
 
 rule_rows = []
-for number, key, name, threshold in RULES:
+thresholds_are_historical = False
+
+for number, key, name, configured, render_limit in RULES:
     check = latest_checks.get(key)
     if check is None:
-        state, observed = "idle", ""
-    else:
-        state = "pass" if check.get("passed") else "fail"
-        observed = "" if check.get("observed") is None else str(check["observed"])
+        rule_rows.append(T.rule_row(number, name, configured, "idle", ""))
+        continue
+
+    state = "pass" if check.get("passed") else "fail"
+    observed = "" if check.get("observed") is None else str(check["observed"])
+
+    # Prefer the limit recorded with the verdict; it is the one that produced
+    # this pass/fail. Fall back to the configured text when the journal predates
+    # limits being recorded.
+    threshold = configured
+    if check.get("limit") is not None:
+        try:
+            threshold = render_limit(check["limit"])
+        except (TypeError, ValueError):
+            threshold = str(check["limit"])
+        if threshold != configured:
+            thresholds_are_historical = True
+
     rule_rows.append(T.rule_row(number, name, threshold, state, observed))
 
-if gate_events:
-    last = gate_events[-1]
-    verdict = "APPROVED" if last["event_type"] == "trade_approved" else "REJECTED"
-    tone = "secondary" if verdict == "APPROVED" else "error"
-    caption = (
-        f"Most recent evaluation: {last.get('ticker', '?')} · {verdict} · "
-        f"{str(last.get('timestamp', ''))[:19].replace('T', ' ')}"
-    )
-    html(T.pill_row([T.status_pill(f"LAST SPREAD: {verdict}", tone)]))
-    st.caption(caption)
-else:
-    st.caption("No spread has been evaluated yet — thresholds shown, no verdict.")
-
 html(T.rule_grid(rule_rows))
+
+if thresholds_are_historical:
+    st.caption(
+        "Thresholds above are the ones applied at evaluation time. One or more "
+        "has since been changed in `config/risk_config.json`, so they will not "
+        "all match the sidebar until the next cycle runs."
+    )
 
 # --------------------------------------------------------- performance
 

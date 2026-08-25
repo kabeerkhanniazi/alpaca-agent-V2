@@ -122,7 +122,22 @@ class Orchestrator:
         }
 
         # 1. Market-hours gate, from Alpaca's own clock rather than local time.
-        clock = adapt_clock(await self.mcp.call_read("get_clock", {}))
+        #
+        # This and the portfolio read are the two calls that must survive a bad
+        # credential or a transient Alpaca outage without a traceback: an
+        # unattended run needs a journalled reason in the log, not a stack dump
+        # that cron mails into the void.
+        try:
+            clock = adapt_clock(await self.mcp.call_read("get_clock", {}))
+        except MCPError as exc:
+            reason = _explain(exc)
+            logger.error("Could not reach Alpaca: %s", reason)
+            self.journal.log_error(run_id, "-", reason)
+            summary["errors"].append(reason)
+            summary["skipped"] = "alpaca_unreachable"
+            self.journal.log_cycle(run_id, summary)
+            return summary
+
         if not clock.is_open and not force:
             self.journal.log_skip(run_id, "-", "Market closed; no cycle run.")
             summary["skipped"] = "market_closed"
@@ -131,7 +146,17 @@ class Orchestrator:
             return summary
 
         # 2. Portfolio state — feeds the kill switch and Rules 3, 5 and 9.
-        portfolio = await self.build_portfolio()
+        try:
+            portfolio = await self.build_portfolio()
+        except MCPError as exc:
+            reason = _explain(exc)
+            logger.error("Could not read the account: %s", reason)
+            self.journal.log_error(run_id, "-", reason)
+            summary["errors"].append(reason)
+            summary["skipped"] = "portfolio_unavailable"
+            self.journal.log_cycle(run_id, summary)
+            return summary
+
         summary["nav"] = portfolio["nav"]
         summary["daily_pnl_pct"] = portfolio["daily_pnl_pct"]
 
@@ -700,6 +725,34 @@ def compute_limit_price(spread: dict[str, Any], config: AgentConfig) -> float:
 
     credit_per_share = max(0.01, credit_per_share - slippage)
     return -round(credit_per_share, 2)
+
+
+def _explain(exc: Exception) -> str:
+    """Turn a transport error into one line a human can act on.
+
+    A 401 buried in an nginx HTML error page is the most likely thing to greet
+    someone reading cron.log, and "Unauthorized - <html><head><title>..." is not
+    a useful log line at 9:35 on a Monday.
+    """
+    text = str(exc)
+    if "401" in text or "Unauthorized" in text:
+        return (
+            "Alpaca rejected the credentials (HTTP 401). Check ALPACA_API_KEY and "
+            "ALPACA_SECRET_KEY in .env, and that they belong to a paper account "
+            "when ALPACA_PAPER_TRADE=true."
+        )
+    if "403" in text and "OPRA" in text:
+        return (
+            "Alpaca returned 403 for the options feed. Pass feed=\"indicative\"; "
+            "the OPRA feed needs a signed agreement."
+        )
+    if "403" in text:
+        return f"Alpaca refused the request (HTTP 403): {text[:200]}"
+    # Collapse any HTML error page to its first meaningful line.
+    if "<html>" in text.lower():
+        head = text.split("<html>")[0].strip()
+        return (head or text)[:200]
+    return text[:300]
 
 
 def _dumps(value: Any) -> str:

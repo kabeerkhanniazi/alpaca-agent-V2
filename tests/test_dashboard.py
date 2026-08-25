@@ -229,3 +229,24 @@ def test_the_live_accessors_raise_rather_than_returning_none(monkeypatch):
     source = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
     assert "_live_or_raise" in source
     assert 'raise RuntimeError(state["unavailable"])' in source
+
+
+def test_the_risk_gate_shows_the_limit_that_produced_the_verdict():
+    """A rule marked FAILED must not display a limit it plainly satisfies.
+
+    The panel used to render the threshold from the *current* config beside a
+    pass/fail from the *journal*. Tune a threshold after a cycle and the two
+    disagree: R1 showed a red cross against "limit 0.20 · observed 0.1517",
+    which passes. The limit recorded with the verdict is the honest one.
+    """
+    source = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+    assert 'check.get("limit") is not None' in source
+    assert "render_limit(check[\"limit\"])" in source
+    assert "thresholds_are_historical" in source
+
+
+@pytest.mark.integration
+def test_a_changed_threshold_is_disclosed_rather_than_silently_shown(tmp_path, monkeypatch):
+    """When journalled limits differ from config, the page says so."""
+    source = (REPO_ROOT / "streamlit_app.py").read_text(encoding="utf-8")
+    assert "applied at evaluation time" in source

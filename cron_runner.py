@@ -89,9 +89,17 @@ async def run(args: argparse.Namespace) -> int:
         orchestrator = Orchestrator(mcp, llm, config, journal, dry_run=dry_run)
         summary = await orchestrator.run_cycle(tickers, force=args.force)
 
-    if summary.get("skipped"):
+    skipped = summary.get("skipped")
+    if skipped == "market_closed":
         logger.info("Cycle %s skipped: market closed.", summary["run_id"])
         return 0
+    if skipped:
+        # An infrastructure skip, not a scheduled no-op. Exit non-zero so cron
+        # and any monitoring can tell "nothing to do" apart from "could not run".
+        for problem in summary.get("errors", []):
+            logger.error("%s", problem)
+        logger.error("Cycle %s could not run (%s).", summary["run_id"], skipped)
+        return 1
 
     for ticker, outcome in summary.get("outcomes", {}).items():
         logger.info(
