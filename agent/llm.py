@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import random
+import re
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,8 +36,11 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 90.0
-MAX_ATTEMPTS_PER_PROVIDER = 2
+MAX_ATTEMPTS_PER_PROVIDER = 3
 BASE_BACKOFF_SECONDS = 2.0
+# A tokens-per-minute window is at most 60s wide, so waiting longer than this
+# means something other than a rate limit is wrong.
+MAX_BACKOFF_SECONDS = 75.0
 
 # Status codes worth waiting out. Everything else in the 4xx range is a settled
 # rejection — a bad key or a malformed request does not improve on retry.
@@ -48,12 +52,19 @@ class LLMError(RuntimeError):
 
     ``retryable`` distinguishes "wait and try again" from "this will never work",
     which is what decides between a backoff and an immediate failover.
+
+    ``retry_after`` carries the provider's own estimate of when it will accept
+    traffic again. A tokens-per-minute limit is transient by definition, and
+    guessing a shorter backoff than the provider asked for just burns the
+    remaining budget on requests that cannot succeed.
     """
 
-    def __init__(self, message: str, *, status: int | None = None, retryable: bool = False):
+    def __init__(self, message: str, *, status: int | None = None,
+                 retryable: bool = False, retry_after: float | None = None):
         super().__init__(message)
         self.status = status
         self.retryable = retryable
+        self.retry_after = retry_after
 
 
 @dataclass
@@ -122,10 +133,17 @@ class Provider:
         if response.status_code < 400:
             return
         body = response.text[:400]
+        # 413 from Groq is a rate-limit response, not a permanent rejection: the
+        # request was larger than what remained of the per-minute token budget,
+        # and the same request succeeds once the window rolls over.
+        retryable = response.status_code in RETRYABLE_STATUS or (
+            response.status_code == 413 and "rate_limit" in body
+        )
         raise LLMError(
             f"{provider} returned {response.status_code}: {body}",
             status=response.status_code,
-            retryable=response.status_code in RETRYABLE_STATUS,
+            retryable=retryable,
+            retry_after=_retry_after(response, body),
         )
 
 
@@ -428,7 +446,9 @@ class LLMClient:
                         failures.append(f"{provider.name}:{provider.model} -> {exc}")
                         if not exc.retryable or attempt == MAX_ATTEMPTS_PER_PROVIDER:
                             break
-                        delay = BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                        # Prefer the provider's own estimate over a guess.
+                        delay = exc.retry_after or BASE_BACKOFF_SECONDS * (2 ** (attempt - 1))
+                        delay = min(delay, MAX_BACKOFF_SECONDS)
                         delay += random.uniform(0, 0.5)  # de-sync concurrent tickers
                         logger.warning(
                             "%s attempt %d/%d failed (%s) — retrying in %.1fs",
@@ -447,6 +467,43 @@ class LLMClient:
 
 
 # ------------------------------------------------------------------ helpers
+
+
+_RETRY_SECONDS = re.compile(r"try again in ([\d.]+)\s*s", re.I)
+
+
+def _retry_after(response: httpx.Response, body: str) -> float | None:
+    """How long the provider asked us to wait, if it said.
+
+    Checked in order of reliability: the standard `Retry-After` header, Groq's
+    `x-ratelimit-reset-tokens`, then the prose in the error body, which is the
+    only place Groq puts the figure on a 413.
+    """
+    header = response.headers.get("retry-after")
+    if header:
+        try:
+            return float(header)
+        except ValueError:
+            pass
+
+    for name in ("x-ratelimit-reset-tokens", "x-ratelimit-reset-requests"):
+        raw = response.headers.get(name)
+        if raw:
+            seconds = _duration(raw)
+            if seconds is not None:
+                return seconds
+
+    match = _RETRY_SECONDS.search(body or "")
+    return float(match.group(1)) if match else None
+
+
+def _duration(raw: str) -> float | None:
+    """Parse Groq's compact durations: "7.74s", "23m2.4s"."""
+    match = re.fullmatch(r"(?:(\d+)m)?([\d.]+)s", raw.strip())
+    if not match:
+        return None
+    minutes, seconds = match.groups()
+    return (int(minutes) * 60 if minutes else 0) + float(seconds)
 
 
 def _loads(value: Any) -> dict[str, Any]:

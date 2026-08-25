@@ -24,6 +24,13 @@
 # every cycle asks Alpaca what time it is. A no-op costs one get_clock call and
 # exits in about three seconds, and it is immune to DST on either continent.
 #
+# Fifteen minutes, not five. Groq's free tier allows 1,000 requests a day but
+# only 8,000 tokens a minute, and one ticker costs roughly 6,000-12,000 tokens
+# across its turns. At a five-minute cadence three underlyings saturate that
+# window continuously: every cycle spent its time waiting on 429s and none of
+# them finished. At fifteen the budget recovers between cycles and a cycle
+# completes in under a minute. Raise it back only with a paid tier.
+#
 # PATH is set explicitly because cron's default is /usr/bin:/bin, and the MCP
 # server is launched as `uvx alpaca-mcp-server` from ~/.local/bin. Without this
 # every scheduled cycle fails at connect time while working perfectly when run
@@ -70,7 +77,7 @@ mkdir -p "${REPO}/logs"
 BLOCK="$(cat <<CRON
 ${MARKER}
 PATH=${HOME}/.local/bin:${HOME}/go/bin:/usr/local/bin:/usr/bin:/bin
-*/5 * * * * cd ${REPO} && ${REPO}/.venv/bin/python cron_runner.py ${MODE} >> ${REPO}/logs/cron.log 2>&1; ${REPO}/scripts/push_journal.sh >> ${REPO}/logs/journal_push.log 2>&1
+*/15 * * * * cd ${REPO} && ${REPO}/.venv/bin/python cron_runner.py ${MODE} >> ${REPO}/logs/cron.log 2>&1; ${REPO}/scripts/push_journal.sh >> ${REPO}/logs/journal_push.log 2>&1
 ${MARKER}-end
 CRON
 )"

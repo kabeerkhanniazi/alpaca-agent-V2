@@ -1,10 +1,7 @@
 {
   "_comment": "The ONLY Alpaca tools the language model is ever shown. This file is the enforcement point for the architecture in PLAN.md section 1 and is asserted by tests/test_tool_mediation.py.",
-
   "_why_a_code_allowlist": "ALPACA_TOOLSETS scoping exists but cannot express this split. The 'trading' toolset bundles get_all_positions / get_open_position / get_orders -- which the agent genuinely needs -- with place_option_order, close_position, close_all_positions, cancel_all_orders and five more write tools. There is no value of that variable that yields position reads without also yielding order placement. See docs/mcp_tools.md section 3.",
-
   "_allowlist_by_inclusion": "Named individually rather than derived by subtracting known write tools from the enabled toolsets. Stage 1 found four tools -- get_locates, get_locate, get_locate_quotes and the WRITE tool create_locate -- that belong to no documented toolset at all. A subtractive allowlist would have missed create_locate entirely.",
-
   "read_tools": [
     "get_clock",
     "get_account_info",
@@ -18,9 +15,7 @@
     "get_stock_latest_trade",
     "get_stock_snapshot"
   ],
-
   "_write_tools_comment": "Never passed to the model. The ORCHESTRATOR calls place_option_order on gate approval and close_position for exits, through MCPClient.call_write() -- a separate method the model has no route to. Listed here so the safety test can assert on the complete set rather than a remembered subset; enumerated live from the server in Stage 1.",
-
   "write_tools": [
     "place_stock_order",
     "place_crypto_order",
@@ -40,12 +35,19 @@
     "remove_asset_from_watchlist_by_id",
     "create_locate"
   ],
-
   "orchestrator_write_tools": [
     "place_option_order",
     "close_position"
   ],
-
   "toolsets": "account,assets,stock-data,options-data,trading",
-  "_toolsets_note": "Defence in depth only -- it removes watchlists, crypto, news, fixed-income, index and locates from the process entirely (74 tools down to 38). The allowlist above remains the enforcement point, because it is the thing under test."
+  "_toolsets_note": "Defence in depth only -- it removes watchlists, crypto, news, fixed-income, index and locates from the process entirely (74 tools down to 38). The allowlist above remains the enforcement point, because it is the thing under test.",
+  "_model_tools_comment": "The subset of read_tools actually handed to the MODEL. Smaller than read_tools on purpose: every schema is resent on every turn, and the full eleven cost ~3,900 tokens per request -- half of Groq's free-tier 8,000 tokens-per-minute budget, which made requests larger than the entire per-minute allowance. The tools left out are ones the ORCHESTRATOR calls deterministically and the analyst has no use for: bars feed IV rank (already given in the preamble), get_orders drives idempotency, and get_option_contracts / get_stock_snapshot / get_open_position are covered by the chain, latest trade, and get_all_positions respectively. Narrowing this list also narrows what the model can reach, so it is a security improvement as well as a budget one.",
+  "model_tools": [
+    "get_clock",
+    "get_account_info",
+    "get_all_positions",
+    "get_stock_latest_trade",
+    "get_option_chain",
+    "get_option_snapshot"
+  ]
 }

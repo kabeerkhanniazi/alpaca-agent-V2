@@ -85,6 +85,11 @@ class MCPClient:
     ):
         self.config = allowlist or load_allowlist()
         self.read_tools: set[str] = set(self.config["read_tools"])
+        # What the model is shown, which is a subset of what the orchestrator may
+        # call. Falls back to the full read set when unconfigured.
+        self.model_tools: set[str] = set(
+            self.config.get("model_tools") or self.config["read_tools"]
+        )
         self.write_tools: set[str] = set(self.config["write_tools"])
         self.orchestrator_write_tools: set[str] = set(self.config["orchestrator_write_tools"])
         self.timeout = timeout
@@ -162,6 +167,10 @@ class MCPClient:
         """Allowlisted tools the connected server actually exposes."""
         return sorted(self.read_tools & set(self._server_tools))
 
+    def available_model_tools(self) -> list[str]:
+        """The read tools the model is shown — a subset of the allowlist."""
+        return sorted(self.model_tools & self.read_tools & set(self._server_tools))
+
     def missing_read_tools(self) -> list[str]:
         """Allowlisted tools the server did not expose.
 
@@ -185,12 +194,14 @@ class MCPClient:
                 "type": "function",
                 "function": {
                     "name": name,
-                    "description": (self._server_tools[name].description or "").strip(),
-                    "parameters": self._server_tools[name].input_schema
-                    or {"type": "object", "properties": {}},
+                    "description": _first_sentences(self._server_tools[name].description),
+                    "parameters": _trim_schema(
+                        self._server_tools[name].input_schema
+                        or {"type": "object", "properties": {}}
+                    ),
                 },
             }
-            for name in self.available_read_tools()
+            for name in self.available_model_tools()
         ]
         schemas.append(PROPOSE_SPREAD_SCHEMA)
         return schemas
@@ -249,6 +260,44 @@ class MCPClient:
             raise MCPError(f"{name} failed: {text[:500]}")
 
         return unwrap(text, name)
+
+
+# Schemas are resent on every turn, so their size is multiplied by the turn cap.
+# Alpaca's descriptions are written for humans browsing docs and run to several
+# sentences per parameter; the model needs the first one.
+_MAX_DESCRIPTION = 180
+_MAX_PARAM_DESCRIPTION = 110
+
+
+def _first_sentences(text: str | None, limit: int = _MAX_DESCRIPTION) -> str:
+    """Keep the leading sentence(s) of a description, up to `limit` characters."""
+    clean = " ".join((text or "").split())
+    if len(clean) <= limit:
+        return clean
+    cut = clean[:limit]
+    stop = cut.rfind(". ")
+    return (cut[: stop + 1] if stop > limit // 2 else cut).strip()
+
+
+def _trim_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Shorten parameter descriptions without changing the contract.
+
+    Names, types, enums and `required` are untouched — only prose is shortened,
+    so a trimmed schema still describes exactly the same call.
+    """
+    out = dict(schema)
+    properties = out.get("properties")
+    if not isinstance(properties, dict):
+        return out
+
+    trimmed: dict[str, Any] = {}
+    for name, spec in properties.items():
+        if isinstance(spec, dict) and isinstance(spec.get("description"), str):
+            spec = dict(spec)
+            spec["description"] = _first_sentences(spec["description"], _MAX_PARAM_DESCRIPTION)
+        trimmed[name] = spec
+    out["properties"] = trimmed
+    return out
 
 
 def unwrap(text: str, tool_name: str = "") -> Any:
