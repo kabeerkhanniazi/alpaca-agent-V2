@@ -147,3 +147,50 @@ def test_remote_url_is_overridable_by_env(monkeypatch):
 def test_remote_url_defaults_to_the_data_branch(monkeypatch):
     monkeypatch.delenv("JOURNAL_REMOTE_URL", raising=False)
     assert js.remote_url().startswith("https://raw.githubusercontent.com/")
+
+
+def test_the_credential_guard_matches_values_not_prose(tmp_path):
+    """A guard that cries wolf is worse than no guard.
+
+    The agent's own 401 message says "check ALPACA_API_KEY and ALPACA_SECRET_KEY
+    in .env". An earlier version of the publish guard matched those bare words,
+    so that helpful message silently blocked every publish for two days while
+    the dashboard sat on stale data — and the failure looked like nothing
+    happening at all.
+    """
+    import re
+    import subprocess
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "push_journal.sh").read_text()
+    patterns = re.findall(r"^\s*'([^']+)'\s*(?:#.*)?$", script, re.M)
+    assert patterns, "no secret patterns found in push_journal.sh"
+
+    prose = (
+        '{"error": "Alpaca rejected the credentials (HTTP 401). Check '
+        'ALPACA_API_KEY and ALPACA_SECRET_KEY in .env."}'
+    )
+    for pattern in patterns:
+        got = subprocess.run(["grep", "-qE", pattern], input=prose,
+                             text=True, capture_output=True)
+        assert got.returncode != 0, f"pattern {pattern!r} false-positives on prose"
+
+
+def test_the_credential_guard_still_catches_a_real_key():
+    """Tightening it must not have disarmed it."""
+    import re
+    import subprocess
+    from pathlib import Path
+
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "push_journal.sh").read_text()
+    patterns = re.findall(r"^\s*'([^']+)'\s*(?:#.*)?$", script, re.M)
+
+    for leak in ('{"k":"PKDMUDABCDEFGH1234567"}',
+                 '{"k":"sk-or-v1-abcdefghijklmnopqrstuvwxyz"}',
+                 '{"k":"gsk_abcdefghijklmnopqrstuvwxyz0123456789"}'):
+        caught = any(
+            subprocess.run(["grep", "-qE", p], input=leak, text=True,
+                           capture_output=True).returncode == 0
+            for p in patterns
+        )
+        assert caught, f"a real credential slipped through: {leak}"
