@@ -320,5 +320,19 @@ def unwrap(text: str, tool_name: str = "") -> Any:
     if isinstance(payload, dict):
         payload.pop(SECURITY_KEY, None)
         if "data" in payload and len(payload) == 1:
-            return payload["data"]
+            payload = payload["data"]
+
+    # Tools that return a collection wrap it once more: get_all_positions and
+    # get_orders answer {"result": [...]} where get_clock and get_account_info
+    # answer the object directly. Unwrapping here rather than per-adapter means
+    # any future list-returning tool works without a change.
+    #
+    # This was not cosmetic. Missing it made get_all_positions look empty, so
+    # the risk gate judged every proposal against a book it believed was flat:
+    # Rule 5 could not see a duplicate strike, Rule 3 measured no exposure, and
+    # exit management had nothing to close. The agent opened spreads it could
+    # never close and stacked five contracts on one strike.
+    if isinstance(payload, dict) and list(payload.keys()) == ["result"]:
+        return payload["result"]
+
     return payload

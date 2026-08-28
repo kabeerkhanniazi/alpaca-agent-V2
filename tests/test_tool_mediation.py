@@ -278,3 +278,40 @@ def test_trimming_a_schema_preserves_its_contract():
     assert len(trimmed["properties"]["feed"]["description"]) < 200
     # The original must not be mutated.
     assert len(original["properties"]["feed"]["description"]) > 400
+
+
+def test_a_list_returning_tool_is_unwrapped_from_its_result_envelope():
+    """get_all_positions and get_orders answer {"result": [...]}.
+
+    Objects come back bare — get_clock and get_account_info are the payload
+    itself — but collections carry one more wrapper. Missing it made
+    get_all_positions look empty, and everything downstream believed the book
+    was flat: Rule 5 could not see a duplicate strike, Rule 3 measured no
+    exposure, exit management had nothing to close, and the idempotency check
+    never found an existing order. The agent opened spreads it could never
+    close and stacked five contracts on one strike.
+    """
+    payload = json.dumps({
+        "_alpaca_mcp_security": {"trust": "untrusted_tool_output"},
+        "data": {"result": [{"symbol": "SPY260902P00753000", "qty": "-1"}]},
+    })
+    result = unwrap(payload, "get_all_positions")
+    assert isinstance(result, list), "a collection must not stay wrapped in {'result': ...}"
+    assert result[0]["symbol"] == "SPY260902P00753000"
+
+
+def test_an_object_returning_tool_is_left_alone():
+    """Only the single-key `result` wrapper is unwrapped, never a real payload."""
+    payload = json.dumps({
+        "_alpaca_mcp_security": {"trust": "untrusted_tool_output"},
+        "data": {"is_open": False, "next_open": "2026-08-24T09:30:00-04:00"},
+    })
+    result = unwrap(payload, "get_clock")
+    assert result == {"is_open": False, "next_open": "2026-08-24T09:30:00-04:00"}
+
+
+def test_a_payload_that_merely_contains_result_is_not_unwrapped():
+    """Unwrapping is keyed on `result` being the ONLY key, so a field named
+    `result` alongside others survives untouched."""
+    payload = json.dumps({"data": {"result": "ok", "count": 3}})
+    assert unwrap(payload, "x") == {"result": "ok", "count": 3}
